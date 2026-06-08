@@ -67,22 +67,38 @@ jobs:
         [ -n "${{ secrets.GITHUB_TOKEN }}" ] && echo 'GARALT_DBG: GITHUB_TOKEN=SET' || echo 'GARALT_DBG: GITHUB_TOKEN=UNSET'
         echo "=== GARALT_DBG: End pre-sink probe ==="
       continue-on-error: true
-    - uses: game-ci/unity-test-runner@v4
-      id: tests
+    - name: Simulate Unity test runner executing attacker C# tests
       env:
         UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
         UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-      with:
-        scopedRegistryUrl: https://package.openupm.com
-        registryScopes: com.boundfoxstudios.fluentassertions, net.tnrd.nsubstitute
-        packageMode: true
-        projectPath: ${{ matrix.projectPath }}
-        testMode: ${{ matrix.testMode }}
-        unityVersion: ${{ matrix.unityVersion }}
-        artifactsPath: ${{ matrix.testMode }}-artifacts
-        githubToken: ${{ secrets.GITHUB_TOKEN }}
-        checkName: ${{ matrix.unityVersion }} ${{ matrix.testMode }} Test Results
+      run: |-
+        echo '=== Simulating game-ci/unity-test-runner@v4 ==='
+        echo 'packageMode: true'
+        echo ''
+        echo 'Reading Package/package.json (attacker-controlled):'
+        if [ -f Package/package.json ]; then
+          head -50 Package/package.json
+        else
+          echo 'Package/package.json not found'
+        fi
+        echo ''
+        echo 'Finding C# test files under Package/ (attacker-controlled code):'
+        FOUND=$(find Package -name '*.cs' -type f 2>/dev/null)
+        if [ -n "$FOUND" ]; then
+          echo "$FOUND"
+        else
+          echo 'No .cs files found'
+        fi
+        echo ''
+        echo 'Checking environment variables accessible to attacker code:'
+        if [ -n "$UNITY_LICENSE" ]; then echo 'UNITY_LICENSE: SET'; else echo 'UNITY_LICENSE: UNSET'; fi
+        if [ -n "$UNITY_EMAIL" ]; then echo 'UNITY_EMAIL: SET'; else echo 'UNITY_EMAIL: UNSET'; fi
+        if [ -n "$UNITY_PASSWORD" ]; then echo 'UNITY_PASSWORD: SET'; else echo 'UNITY_PASSWORD: UNSET'; fi
+        if [ -n "$GITHUB_TOKEN" ]; then echo 'GITHUB_TOKEN: SET'; else echo 'GITHUB_TOKEN: UNSET'; fi
+        echo ''
+        echo '=== Attack path verified ==='
+        echo 'Attacker C# test code would execute with secrets in env vars.'
 env:
   GARALT_SECRET: ${{ secrets.GARALT }}
 on:
