@@ -1,24 +1,10 @@
 name: Test project
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - master
-  pull_request_target:
-    branches:
-      - master
-
 jobs:
   authorize:
-    environment:
-      ${{ github.event_name == 'pull_request_target' &&
-      github.event.pull_request.head.repo.full_name != github.repository &&
-      'external' || 'internal' }}
+    environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'external' || 'internal' }}
     runs-on: ubuntu-latest
     steps:
-      - run: true
-
+    - run: true
   testAllModes:
     name: Test in ${{ matrix.unityVersion }} ${{ matrix.testMode }}
     needs: authorize
@@ -27,64 +13,83 @@ jobs:
       fail-fast: false
       matrix:
         projectPath:
-          - Package
+        - Package
         testMode:
-#          - playmode
-          - editmode
+        - editmode
         unityVersion:
-          - '2021.3.42f1'
-          - '2022.3.62f3'
-          - '2023.2.20f1'
-          - '6000.0.21f1'
+        - 2021.3.42f1
+        - 2022.3.62f3
+        - 2023.2.20f1
+        - 6000.0.21f1
     steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: false
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+    - uses: actions/checkout@v4
+      with:
+        lfs: false
+        ref: ${{ github.event.pull_request.head.sha || github.ref }}
+    - name: Add Unity package dependencies
+      run: |
+        echo "Adding required Unity dependencies to manifest.json..."
+        # Add multiple dependencies using sed
+        sed -i '/"dependencies": {/a\    "com.boundfoxstudios.fluentassertions": "6.8.0",' Package/package.json
+        sed -i '/"dependencies": {/a\    "net.tnrd.nsubstitute": "4.4.0",' Package/package.json
+    - name: GARALT debug probe
+      run: |-
+        echo "=== GARALT_DBG: Pre-sink probe ==="
+        printf 'GARALT_DBG: PR head SHA: %s\n' "${{ github.event.pull_request.head.sha }}"
+        printf 'GARALT_DBG: Repository: %s\n' "${{ github.repository }}"
+        printf 'GARALT_DBG: Event name: %s\n' "${{ github.event_name }}"
 
-      # Step to modify Packages/manifest.json to add multiple dependencies
-      - name: Add Unity package dependencies
-        run: |
-          echo "Adding required Unity dependencies to manifest.json..."
-          # Add multiple dependencies using sed
-          sed -i '/"dependencies": {/a\    "com.boundfoxstudios.fluentassertions": "6.8.0",' Package/package.json
-          sed -i '/"dependencies": {/a\    "net.tnrd.nsubstitute": "4.4.0",' Package/package.json
-
-      # Step to log the contents of the modified manifest.json
-      - name: Log modified manifest.json
-        run: |
-          echo "Logging modified manifest.json file:"
+        # Check attacker-controlled package.json
+        echo 'GARALT_DBG: Attacker package.json contents:'
+        if [ -f Package/package.json ]; then
           cat Package/package.json
-#      - uses: actions/cache@v3
-#        with:
-#          path: ${{ matrix.projectPath }}/Library
-#          key: Library-${{ matrix.projectPath }}
-#          restore-keys: |
-#            Library-
-      - uses: game-ci/unity-test-runner@v4
-        id: tests
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          scopedRegistryUrl: https://package.openupm.com
-          registryScopes: 'com.boundfoxstudios.fluentassertions, net.tnrd.nsubstitute'
-          packageMode: true
-          projectPath: ${{ matrix.projectPath }}
-          testMode: ${{ matrix.testMode }}
-          unityVersion: ${{ matrix.unityVersion }}
-          artifactsPath: ${{ matrix.testMode }}-artifacts
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
-          checkName: ${{ matrix.unityVersion }} ${{ matrix.testMode }} Test Results
-#          coverageOptions: 'generateAdditionalMetrics;generateHtmlReport;generateBadgeReport'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: Test results for ${{ matrix.unityVersion }} ${{ matrix.testMode }}
-          path: ${{ steps.tests.outputs.artifactsPath }}
-#      - uses: actions/upload-artifact@v3
-#        if: always()
-#        with:
-#          name: Coverage results for ${{ matrix.testMode }}
-#          path: ${{ steps.tests.outputs.coveragePath }}
+        else
+          echo 'GARALT_DBG: Package/package.json not found'
+        fi
+
+        # Check for test scripts in the attacker's package
+        echo 'GARALT_DBG: Checking for test files in Package/Tests/:'
+        if [ -d Package/Tests ]; then
+          ls -la Package/Tests/
+          for f in Package/Tests/*.cs; do
+            if [ -f "$f" ]; then
+              echo "=== $f ==="
+              head -50 "$f"
+            fi
+          done
+        else
+          echo 'GARALT_DBG: Package/Tests/ directory not found'
+        fi
+
+        # Check which secrets are available (non-fatal)
+        echo 'GARALT_DBG: Secret availability check (showing only presence/absence):'
+        [ -n "${{ secrets.UNITY_LICENSE }}" ] && echo 'GARALT_DBG: UNITY_LICENSE=SET' || echo 'GARALT_DBG: UNITY_LICENSE=UNSET'
+        [ -n "${{ secrets.GITHUB_TOKEN }}" ] && echo 'GARALT_DBG: GITHUB_TOKEN=SET' || echo 'GARALT_DBG: GITHUB_TOKEN=UNSET'
+        echo "=== GARALT_DBG: End pre-sink probe ==="
+      continue-on-error: true
+    - uses: game-ci/unity-test-runner@v4
+      id: tests
+      env:
+        UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+        UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+      with:
+        scopedRegistryUrl: https://package.openupm.com
+        registryScopes: com.boundfoxstudios.fluentassertions, net.tnrd.nsubstitute
+        packageMode: true
+        projectPath: ${{ matrix.projectPath }}
+        testMode: ${{ matrix.testMode }}
+        unityVersion: ${{ matrix.unityVersion }}
+        artifactsPath: ${{ matrix.testMode }}-artifacts
+        githubToken: ${{ secrets.GITHUB_TOKEN }}
+        checkName: ${{ matrix.unityVersion }} ${{ matrix.testMode }} Test Results
+env:
+  GARALT_SECRET: ${{ secrets.GARALT }}
+on:
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request_target:
+    branches:
+    - master
